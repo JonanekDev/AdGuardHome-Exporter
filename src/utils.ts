@@ -37,7 +37,6 @@ export function setTopStats(
   data: StatEntry[],
   label: string,
 ) {
-  metric.reset();
   for (const row of data) {
     for (const [key, value] of Object.entries(row)) {
       metric.set({ instance, [label]: key }, value);
