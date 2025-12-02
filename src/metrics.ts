@@ -1,11 +1,6 @@
 import promClient from "prom-client";
-import {
-  AdGuardAPIStats,
-  AdGuardAPIStatus,
-  AdGuardServer,
-  StatEntry,
-} from "./types";
-import axios, { AxiosRequestConfig, AxiosResponse } from "axios";
+import { AdGuardAPIStats, AdGuardAPIStatus, AdGuardServer, StatEntry } from "./types";
+import axios, { AxiosResponse } from "axios";
 import { updateCounter, setTopStats, getHeaderAuth } from "./utils";
 
 export const register = new promClient.Registry();
@@ -109,13 +104,12 @@ const metrics = {
   }),
 };
 
-
 async function fetchAdGuardStatus(server: AdGuardServer): Promise<void> {
   try {
     const response: AxiosResponse<AdGuardAPIStatus> =
       await axios.get<AdGuardAPIStatus>(
         `${server.url}/control/status`,
-        getHeaderAuth(server.username, server.password)
+        getHeaderAuth(server.username, server.password),
       );
     const status: AdGuardAPIStatus = response.data;
 
@@ -123,22 +117,22 @@ async function fetchAdGuardStatus(server: AdGuardServer): Promise<void> {
 
     metrics.protectionEnabled.set(
       { instance: server.url },
-      status.protection_enabled ? 1 : 0
+      status.protection_enabled ? 1 : 0,
     );
 
     metrics.DHCPAvailable.set(
       { instance: server.url },
-      status.dhcp_available ? 1 : 0
+      status.dhcp_available ? 1 : 0,
     );
 
     metrics.adguardProtectionDisabledDuration.set(
       { instance: server.url },
-      status.protection_disabled_duration
+      status.protection_disabled_duration,
     );
   } catch (error) {
     console.error(
       `Error fetching status from ${server.url}:`,
-      error instanceof Error ? error.message : error
+      error instanceof Error ? error.message : error,
     );
     metrics.running.set({ instance: server.url }, 0);
   }
@@ -149,96 +143,100 @@ async function fetchAdGuardStats(server: AdGuardServer): Promise<void> {
     const response: AxiosResponse<AdGuardAPIStats> =
       await axios.get<AdGuardAPIStats>(
         `${server.url}/control/stats`,
-        getHeaderAuth(server.username, server.password)
+        getHeaderAuth(server.username, server.password),
       );
     const stats: AdGuardAPIStats = response.data;
 
     // Top stats
     setTopStats(metrics.topClients, server.url, stats.top_clients, "client");
-    
+
     setTopStats(
       metrics.topBlockedDomains,
       server.url,
       stats.top_blocked_domains,
-      "domain"
+      "domain",
     );
 
     setTopStats(
       metrics.topQueriedDomains,
       server.url,
       stats.top_queried_domains,
-      "domain"
+      "domain",
     );
 
     setTopStats(
       metrics.topUpstreamsAvgTime,
       server.url,
-      stats.top_upstreams_avg_time,
-      "upstream"
+      stats.top_upstreams_avg_time.map((entry) => {
+        // Convert to ms
+        const convertedEntry: StatEntry = {};
+        for (const [key, value] of Object.entries(entry)) {
+          convertedEntry[key] = value * 1000;
+        }
+        return convertedEntry;
+      }),
+      "upstream",
     );
 
     setTopStats(
       metrics.topUpstreamsResponses,
       server.url,
       stats.top_upstreams_responses,
-      "upstream"
+      "upstream",
     );
-
 
     // Counters
     updateCounter(
       metrics.dnsQueriesTotal,
       server.url,
       "num_dns_queries",
-      stats.num_dns_queries
+      stats.num_dns_queries,
     );
 
     updateCounter(
       metrics.blockedQueriesTotal,
       server.url,
       "num_blocked_filtering",
-      stats.num_blocked_filtering
+      stats.num_blocked_filtering,
     );
 
     updateCounter(
       metrics.replacedSafeSearchTotal,
       server.url,
       "num_replaced_safesearch",
-      stats.num_replaced_safesearch
+      stats.num_replaced_safesearch,
     );
 
     updateCounter(
       metrics.replacedSafeBrowsingTotal,
       server.url,
       "num_replaced_safebrowsing",
-      stats.num_replaced_safebrowsing
+      stats.num_replaced_safebrowsing,
     );
 
     updateCounter(
       metrics.replacedParentalTotal,
       server.url,
       "num_replaced_parental",
-      stats.num_replaced_parental
+      stats.num_replaced_parental,
     );
 
     metrics.avgProcessingTime.set(
       { instance: server.url },
-      stats.avg_processing_time
+      stats.avg_processing_time * 1000,
     );
-
   } catch (error) {
     console.error(
       `Error fetching stats from ${server.url}:`,
-      error instanceof Error ? error.message : error
+      error instanceof Error ? error.message : error,
     );
     metrics.running.set({ instance: server.url }, 0);
   }
 }
 
-
 export async function fetch(servers: AdGuardServer[]): Promise<void> {
-    for (const server of servers) {
-        await fetchAdGuardStatus(server);
-        await fetchAdGuardStats(server);
-    }
+  for (const server of servers) {
+    await fetchAdGuardStatus(server);
+    await fetchAdGuardStats(server);
+  }
 }

@@ -18,21 +18,21 @@ ADGUARD_PASSWORDS=Password1,Password2
 
 ## Enviroment variables
 
-| Variable | Required | Default Value | Examples |
-| --- | --- | --- | --- |
-| ADGUARD_URLS | ✅ | - | `192.168.0.8` or `https://192.168.0.8` or `192.168.0.8,192.168.0.9` |
-| ADGUARD_USERNAMES | ✅ | - | `Admin` or `Admin,Admin` |
-| ADGUARD_PASSWORDS | ✅ | - | `MyPassword` or `MyPassword,SecondPassword` |
-| SCRAPE_INTERVAL_SECONDS | ❌ | `30` | `15` |
-| PORT | ❌ | `9100` | `8080` |
+| Variable                | Required | Default Value | Examples                                                            |
+| ----------------------- | -------- | ------------- | ------------------------------------------------------------------- |
+| ADGUARD_URLS            | ✅       | -             | `192.168.0.8` or `https://192.168.0.8` or `192.168.0.8,192.168.0.9` |
+| ADGUARD_USERNAMES       | ✅       | -             | `Admin` or `Admin,Admin`                                            |
+| ADGUARD_PASSWORDS       | ✅       | -             | `MyPassword` or `MyPassword,SecondPassword`                         |
+| SCRAPE_INTERVAL_SECONDS | ❌       | `30`          | `15`                                                                |
+| PORT                    | ❌       | `9100`        | `8080`                                                              |
 
 (If using https specify https in urls)
 
 ## Run in Docker
+
 ```bash
 docker run -d --restart unless-stopped --name adguard-exporter -e ADGUARD_URLS=192.168.0.8,192.168.0.9 -e ADGUARD_USERNAMES=Admin,Admin -e ADGUARD_PASSWORDS=MyBestPassword,MySecondBestPassword -p 9100:9100 jonanek/adguardhome-exporter
 ```
-
 
 ## Prometheus Configuration
 
@@ -40,7 +40,7 @@ Add the following job to your `prometheus.yml` file:
 
 ```yaml
 scrape_configs:
-  - job_name: 'adguardhome'
+  - job_name: "adguardhome"
     static_configs:
-      - targets: ['127.0.0.1:9100']  # or the IP address of the host running the exporter
+      - targets: ["127.0.0.1:9100"] # or the IP address of the host running the exporter
 ```
