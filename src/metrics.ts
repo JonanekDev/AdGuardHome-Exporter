@@ -1,7 +1,7 @@
 import promClient from "prom-client";
 import { AdGuardAPIStats, AdGuardAPIStatus, AdGuardServer, StatEntry } from "./types";
 import axios, { AxiosResponse } from "axios";
-import { updateCounter, setTopStats, getHeaderAuth } from "./utils";
+import { updateCounter, setTopStats, updateTopStatsCounter, getHeaderAuth } from "./utils";
 
 export const register = new promClient.Registry();
 
@@ -72,27 +72,27 @@ const metrics = {
   }),
 
   // Top stats
-  topQueriedDomains: new promClient.Gauge({
-    name: "adguard_top_queried_domains",
-    help: "Top queried domains",
+  topQueriedDomains: new promClient.Counter({
+    name: "adguard_top_queried_domains_total",
+    help: "Top queried domains (total requests)",
     labelNames: ["instance", "domain"],
     registers: [register],
   }),
-  topBlockedDomains: new promClient.Gauge({
-    name: "adguard_top_blocked_domains",
-    help: "Top blocked domains",
+  topBlockedDomains: new promClient.Counter({
+    name: "adguard_top_blocked_domains_total",
+    help: "Top blocked domains (total requests)",
     labelNames: ["instance", "domain"],
     registers: [register],
   }),
-  topClients: new promClient.Gauge({
-    name: "adguard_top_clients",
-    help: "Top clients by number of queries",
+  topClients: new promClient.Counter({
+    name: "adguard_top_clients_total",
+    help: "Top clients by number of queries (total requests)",
     labelNames: ["instance", "client"],
     registers: [register],
   }),
-  topUpstreamsResponses: new promClient.Gauge({
-    name: "adguard_top_upstreams_responses",
-    help: "Top upstream responses",
+  topUpstreamsResponses: new promClient.Counter({
+    name: "adguard_top_upstreams_responses_total",
+    help: "Top upstream responses (total count)",
     labelNames: ["instance", "upstream"],
     registers: [register],
   }),
@@ -148,16 +148,16 @@ async function fetchAdGuardStats(server: AdGuardServer): Promise<void> {
     const stats: AdGuardAPIStats = response.data;
 
     // Top stats
-    setTopStats(metrics.topClients, server.url, stats.top_clients, "client");
+    updateTopStatsCounter(metrics.topClients, server.url, stats.top_clients, "client");
 
-    setTopStats(
+    updateTopStatsCounter(
       metrics.topBlockedDomains,
       server.url,
       stats.top_blocked_domains,
       "domain",
     );
 
-    setTopStats(
+    updateTopStatsCounter(
       metrics.topQueriedDomains,
       server.url,
       stats.top_queried_domains,
@@ -178,7 +178,7 @@ async function fetchAdGuardStats(server: AdGuardServer): Promise<void> {
       "upstream",
     );
 
-    setTopStats(
+    updateTopStatsCounter(
       metrics.topUpstreamsResponses,
       server.url,
       stats.top_upstreams_responses,

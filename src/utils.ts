@@ -25,7 +25,7 @@ export function updateCounter(
     return;
   }
 
-  // Nornal increment
+  // Normal increment
   metric.inc({ instance }, newValue - prev);
 
   previousValues[instance][field] = newValue;
@@ -40,6 +40,39 @@ export function setTopStats(
   for (const row of data) {
     for (const [key, value] of Object.entries(row)) {
       metric.set({ instance, [label]: key }, value);
+    }
+  }
+}
+
+export function updateTopStatsCounter(
+  metric: promClient.Counter<string>,
+  instance: string,
+  data: StatEntry[],
+  label: string,
+) {
+  const counterKey = `${instance}_${label}`;
+  if (!previousValues[counterKey]) previousValues[counterKey] = {};
+
+  for (const row of data) {
+    for (const [key, value] of Object.entries(row)) {
+      const prev = previousValues[counterKey][key];
+
+      // First load
+      if (prev === undefined) {
+        previousValues[counterKey][key] = value;
+        continue;
+      }
+
+      // Detected reset - save new value without incrementing
+      if (value < prev) {
+        previousValues[counterKey][key] = value;
+        continue;
+      }
+
+      // Normal increment
+      metric.inc({ instance, [label]: key }, value - prev);
+
+      previousValues[counterKey][key] = value;
     }
   }
 }
