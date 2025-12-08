@@ -1,8 +1,10 @@
 # AdGuard Home Exporter
 
-[![Docker Hub](https://img.shields.io/docker/pulls/jonanek/adguardhome-exporter.svg)](https://hub.docker.com/r/jonanek/adguardhome-exporter)
+[![Docker Hub](https://img.shields.io/docker/pulls/jonanek/adguardhome-exporter.svg)](https://hub.docker.com/r/jonanek/adguardhome-exporter) 
 
 Prometheus exporter for monitoring AdGuard Home instances. Supports monitoring multiple servers simultaneously.
+
+- [Grafana Dashboard](https://grafana.com/grafana/dashboards/24520-adguard-home-multi-instance-monitoring-prometheus-exporter/)
 
 ## Monitoring Multiple AdGuard Servers
 
