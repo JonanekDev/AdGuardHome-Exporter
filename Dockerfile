@@ -1,9 +1,9 @@
-# Build
+# =========================
+# Build stage
+# =========================
 FROM node:25-alpine AS builder
 
 WORKDIR /app
-
-RUN npm install -g npm@latest
 
 COPY package*.json ./
 RUN npm ci
@@ -11,19 +11,24 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# Production stage
+# =========================
+# Runtime stage
+# =========================
 FROM node:25-alpine
 
 WORKDIR /app
-
-RUN npm install -g npm@latest
 
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=builder /app/dist ./dist
 
-USER node
+RUN apk add --no-cache su-exec
+
+COPY docker-entrypoint.sh /entrypoint.sh
+RUN chmod 755 /entrypoint.sh
 
 EXPOSE 9100
+
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["node", "dist/index.js"]
