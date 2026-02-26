@@ -106,6 +106,7 @@ const metrics = {
 
 async function fetchAdGuardStatus(server: AdGuardServer): Promise<void> {
   try {
+    console.log(`[${new Date().toISOString()}] Fetching status from ${server.url}...`);
     const response: AxiosResponse<AdGuardAPIStatus> =
       await axios.get<AdGuardAPIStatus>(
         `${server.url}/control/status`,
@@ -129,9 +130,11 @@ async function fetchAdGuardStatus(server: AdGuardServer): Promise<void> {
       { instance: server.url },
       status.protection_disabled_duration,
     );
+
+    console.log(`[${new Date().toISOString()}] Status fetched from ${server.url}: running=true, protection_enabled=${status.protection_enabled}, dhcp_available=${status.dhcp_available}`);
   } catch (error) {
     console.error(
-      `Error fetching status from ${server.url}:`,
+      `[${new Date().toISOString()}] Error fetching status from ${server.url}:`,
       error instanceof Error ? error.message : error,
     );
     metrics.running.set({ instance: server.url }, 0);
@@ -140,6 +143,7 @@ async function fetchAdGuardStatus(server: AdGuardServer): Promise<void> {
 
 async function fetchAdGuardStats(server: AdGuardServer): Promise<void> {
   try {
+    console.log(`[${new Date().toISOString()}] Fetching stats from ${server.url}...`);
     const response: AxiosResponse<AdGuardAPIStats> =
       await axios.get<AdGuardAPIStats>(
         `${server.url}/control/stats`,
@@ -225,9 +229,13 @@ async function fetchAdGuardStats(server: AdGuardServer): Promise<void> {
       { instance: server.url },
       stats.avg_processing_time * 1000,
     );
+
+    console.log(`[${new Date().toISOString()}] Stats fetched from ${server.url}: dns_queries=${stats.num_dns_queries}, blocked=${stats.num_blocked_filtering}, avg_time=${(stats.avg_processing_time * 1000).toFixed(2)}ms`);
+    console.log(`[${new Date().toISOString()}] Top clients: ${stats.top_clients.slice(0, 3).map((c) => Object.keys(c)[0]).join(", ") || "none"}`);
+    console.log(`[${new Date().toISOString()}] Top blocked domains: ${stats.top_blocked_domains.slice(0, 3).map((d) => Object.keys(d)[0]).join(", ") || "none"}`);
   } catch (error) {
     console.error(
-      `Error fetching stats from ${server.url}:`,
+      `[${new Date().toISOString()}] Error fetching stats from ${server.url}:`,
       error instanceof Error ? error.message : error,
     );
     metrics.running.set({ instance: server.url }, 0);
@@ -239,4 +247,5 @@ export async function fetch(servers: AdGuardServer[]): Promise<void> {
     await fetchAdGuardStatus(server);
     await fetchAdGuardStats(server);
   }
+  console.log(`[${new Date().toISOString()}] All AdGuard servers fetched successfully`);
 }
