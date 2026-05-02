@@ -5,6 +5,8 @@ FROM node:25-alpine AS builder
 
 WORKDIR /app
 
+RUN npm install -g npm@latest
+
 COPY package*.json ./
 RUN npm ci
 
@@ -17,6 +19,8 @@ RUN npm run build
 FROM node:25-alpine
 
 WORKDIR /app
+
+RUN npm install -g npm@latest
 
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
