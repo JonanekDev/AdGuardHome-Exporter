@@ -1,0 +1,47 @@
+secrets:
+  instance1_username:
+    file: ./instance1_username.txt
+  instance1_password:
+    file: ./instance1_password.txt
+  instance2_username:
+    file: ./instance2_username.txt
+  instance2_password:
+    file: ./instance2_password.txt
+
+services:
+  adguard-exporter:
+    image: jonanek/adguardhome-exporter:latest
+    container_name: adguardhome-exporter
+    # depends_on:
+    #   - prometheus
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 1.0
+    ports:
+      - "9100:9100"
+    environment:
+      # -- Using secrets -- Two AdGuard Home instances configuration, can have more. Just increase the numbering.
+      ADGUARD_URL_1: http://instance1.net
+      ADGUARD_USERNAME_FILE_1: /run/secrets/instance1_username
+      ADGUARD_PASSWORD_FILE_1: /run/secrets/instance1_password
+      ADGUARD_URL_2: http://instance2.net
+      ADGUARD_USERNAME_FILE_2: /run/secrets/instance2_username
+      ADGUARD_PASSWORD_FILE_2: /run/secrets/instance2_password
+      # -- Using direct values -- Two AdGuard Home instances configuration, can have more. Just increase the numbering.
+      # ADGUARD_URL_1: http://instance1.net
+      # ADGUARD_USERNAME_1: Admin
+      # ADGUARD_PASSWORD_1: MyBestPassword
+      # ADGUARD_URL_2: http://instance2.net
+      # ADGUARD_USERNAME_2: Admin
+      # ADGUARD_PASSWORD_2: MySecondBestPassword
+      # -- Or use this way to pass multiple instances in one variable (comma separated, no secrets support):
+      #ADGUARD_URLS: 192.168.0.8,192.168.0.9
+      #ADGUARD_USERNAMES: Admin,Admin
+      #ADGUARD_PASSWORDS: MyBestPassword,MySecondBestPassword
+    secrets:
+      - instance1_username
+      - instance1_password
+      - instance2_username
+      - instance2_password
