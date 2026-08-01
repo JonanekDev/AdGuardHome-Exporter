@@ -50,7 +50,7 @@ export function updateTopStatsCounter(
   data: StatEntry[],
   label: string,
 ) {
-  const counterKey = `${instance}_${label}`;
+  const counterKey = `${instance}\0${label}`;
   if (!previousValues[counterKey]) previousValues[counterKey] = {};
 
   for (const row of data) {

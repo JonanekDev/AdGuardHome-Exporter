@@ -1,11 +1,9 @@
 # =========================
 # Build stage
 # =========================
-FROM node:25-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /app
-
-RUN npm install -g npm@latest
 
 COPY package*.json ./
 RUN npm ci
@@ -16,11 +14,9 @@ RUN npm run build
 # =========================
 # Runtime stage
 # =========================
-FROM node:25-alpine
+FROM node:26-alpine
 
 WORKDIR /app
-
-RUN npm install -g npm@latest
 
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force

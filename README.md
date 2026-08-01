@@ -118,3 +118,5 @@ scrape_configs:
     static_configs:
       - targets: ["127.0.0.1:9100"] # or the IP address of the host running the exporter
 ```
+
+> ⚠️ **Port conflict warning:** Port `9100` is the default port for [Node Exporter](https://github.com/prometheus/node_exporter). If you are running Node Exporter on the same host, you will have a port conflict. In that case, set a different port via the `PORT` environment variable (e.g. `PORT=9617`).

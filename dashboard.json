@@ -298,7 +298,7 @@
         "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
-            "mean"
+            "lastNotNull"
           ],
           "fields": "",
           "values": false
@@ -682,32 +682,7 @@
           },
           "unit": "ms"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "http://192.168.0.8"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": true,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -810,39 +785,7 @@
           },
           "unit": "ms"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "1.0.0.1:53",
-                  "1.1.1.1:53",
-                  "8.8.8.8:53",
-                  "https://dns.quad9.net:443/dns-query",
-                  "tls://1.1.1.1:853",
-                  "tls://8.8.8.8:853",
-                  "tls://dns.quad9.net:853",
-                  "tls://unfiltered.adguard-dns.com:853"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": true,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -956,8 +899,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "editorMode": "builder",
-          "expr": "sum(adguard_blocked_queries_total{job=\"$job\", exported_instance=~\"$instance\"})",
+          "editorMode": "code",
+          "expr": "increase(adguard_blocked_queries_total{job=\"$job\", exported_instance=~\"$instance\"}[$__range])",
           "legendFormat": "Blocked",
           "range": true,
           "refId": "A"
@@ -968,7 +911,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(adguard_dns_queries_total{job=\"$job\", exported_instance=~\"$instance\"}) - sum(adguard_blocked_queries_total{job=\"$job\", exported_instance=~\"$instance\"})",
+          "expr": "increase(adguard_dns_queries_total{job=\"$job\", exported_instance=~\"$instance\"}[$__range]) - increase(adguard_blocked_queries_total{job=\"$job\", exported_instance=~\"$instance\"}[$__range])",
           "hide": false,
           "legendFormat": "Allowed",
           "range": true,
@@ -1252,15 +1195,15 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "topk(20, sum by(client) (adguard_top_clients_total{job=\"$job\", exported_instance=~\"$instance\"}))",
+          "expr": "topk(20, sum by(client) (increase(adguard_top_clients_total{job=\"$job\", exported_instance=~\"$instance\"}[$__range])))",
           "format": "table",
-          "instant": true,
+          "instant": false,
           "legendFormat": "",
-          "range": false,
+          "range": true,
           "refId": "A"
         }
       ],
-      "title": "Top Clients (Total)",
+      "title": "Top Clients",
       "transformations": [
         {
           "id": "organize",
@@ -1367,11 +1310,11 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "topk(20, sum by(domain) (adguard_top_queried_domains_total{job=\"$job\", exported_instance=~\"$instance\"}))",
+          "expr": "topk(20, sum by(domain) (increase(adguard_top_queried_domains_total{job=\"$job\", exported_instance=~\"$instance\"}[$__range])))",
           "format": "table",
-          "instant": true,
+          "instant": false,
           "legendFormat": "",
-          "range": false,
+          "range": true,
           "refId": "A"
         }
       ],
@@ -1483,11 +1426,11 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "topk(20, sum by(domain) (adguard_top_blocked_domains_total{job=\"$job\", exported_instance=~\"$instance\"}))",
+          "expr": "topk(20, sum by(domain) (increase(adguard_top_blocked_domains_total{job=\"$job\", exported_instance=~\"$instance\"}[$__range])))",
           "format": "table",
-          "instant": true,
+          "instant": false,
           "legendFormat": "",
-          "range": false,
+          "range": true,
           "refId": "A"
         }
       ],
@@ -1803,4 +1746,4 @@
   "weekStart": "",
   "gnetId": 24520,
   "description": "Grafana dashboard for monitoring multiple AdGuard Home instances using the AdGuard Home Exporter.\r\nProvides clean visual insights into DNS queries, blocks, client activity, upstream performance, filter usage, and instance health. Fully supports multi-instance monitoring via your Prometheus exporter:\r\nhttps://github.com/JonanekDev/AdGuardHome-Exporter"
-}
+} 

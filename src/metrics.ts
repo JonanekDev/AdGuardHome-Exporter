@@ -128,7 +128,7 @@ async function fetchAdGuardStatus(server: AdGuardServer): Promise<void> {
 
     metrics.adguardProtectionDisabledDuration.set(
       { instance: server.url },
-      status.protection_disabled_duration,
+      status.protection_disabled_duration ?? 0,
     );
 
     console.log(`[${new Date().toISOString()}] Status fetched from ${server.url}: running=true, protection_enabled=${status.protection_enabled}, dhcp_available=${status.dhcp_available}`);
