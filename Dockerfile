@@ -26,7 +26,7 @@ COPY --from=builder /app/dist ./dist
 RUN apk add --no-cache su-exec
 
 COPY docker-entrypoint.sh /entrypoint.sh
-RUN chmod 755 /entrypoint.sh
+RUN dos2unix /entrypoint.sh && chmod 755 /entrypoint.sh
 
 EXPOSE 9100
 
