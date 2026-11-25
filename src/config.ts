@@ -1,126 +1,99 @@
-import { readFileSync, existsSync } from "fs";
+import { readFileSync } from "node:fs";
+import type { AdGuardServer } from "./types.ts";
 
-interface Config {
-  adGuardUrls: string[];
-  adGuardUsernames: string[];
-  adGuardPasswords: string[];
+export interface Config {
+  servers: AdGuardServer[];
   scrapeIntervalSeconds: number;
   port: number;
 }
 
-// Helper to read file content (trimming whitespace)
-function readFileSecret(path: string): string {
-  if (!existsSync(path)) {
-    throw new Error(`Secret file not found: ${path}`);
+type Env = Record<string, string | undefined>;
+
+function positiveInt(env: Env, name: string, fallback: number, max: number): number {
+  const raw = env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!/^\d+$/.test(raw) || value < 1 || value > max) {
+    throw new Error(`${name} must be a whole number from 1 to ${max}, got "${raw}"`);
   }
-  return readFileSync(path, "utf8").trim();
+  return value;
 }
 
-// 1. Try to load using Indexed Env Vars (ADGUARD_URL_1, ADGUARD_URL_2, etc.)
-function loadIndexedConfig(): Partial<Config> | null {
-  const urls: string[] = [];
-  const users: string[] = [];
-  const passwords: string[] = [];
-  
-  let i = 1; // Start counting at 1
-  let foundAny = false;
-
-  while (true) {
-    // Check for ADGUARD_URL_1, ADGUARD_URL_2...
-    const urlEnv = process.env[`ADGUARD_URL_${i}`];
-    
-    // If we don't find the URL, we assume the list is finished
-    if (!urlEnv) {
-      break; 
-    }
-
-    foundAny = true;
-    
-    // Process URL
-    urls.push(urlEnv.startsWith("http") ? urlEnv : `http://${urlEnv}`);
-
-    // Process Username (Check _FILE_1 first, then _1)
-    const userFile = process.env[`ADGUARD_USERNAME_FILE_${i}`];
-    const userRaw = process.env[`ADGUARD_USERNAME_${i}`];
-
-    if (userFile) {
-      users.push(readFileSecret(userFile));
-    } else if (userRaw) {
-      users.push(userRaw);
-    } else {
-      throw new Error(`Configuration Error: Found ADGUARD_URL_${i} but missing ADGUARD_USERNAME_${i} or ADGUARD_USERNAME_FILE_${i}`);
-    }
-
-    // Process Password (Check _FILE_1 first, then _1)
-    const passFile = process.env[`ADGUARD_PASSWORD_FILE_${i}`];
-    const passRaw = process.env[`ADGUARD_PASSWORD_${i}`];
-
-    if (passFile) {
-      passwords.push(readFileSecret(passFile));
-    } else if (passRaw) {
-      passwords.push(passRaw);
-    } else {
-      throw new Error(`Configuration Error: Found ADGUARD_URL_${i} but missing ADGUARD_PASSWORD_${i} or ADGUARD_PASSWORD_FILE_${i}`);
-    }
-
-    i++;
+// The value itself is never put into an error, it may contain a password.
+function normalizeUrl(raw: string, source: string): string {
+  const trimmed = raw.trim();
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  const url = trimmed ? URL.parse(withProtocol) : null;
+  if (!url) throw new Error(`${source} is not a valid URL`);
+  if (url.username || url.password) {
+    throw new Error(`${source} must not contain credentials, set the username and password separately`);
   }
-
-  if (!foundAny) return null;
-
-  return {
-    adGuardUrls: urls,
-    adGuardUsernames: users,
-    adGuardPasswords: passwords
-  };
+  return withProtocol.replace(/\/+$/, "");
 }
 
-// 2. Fallback: Load using Legacy Comma-Separated Env Vars
-function loadLegacyConfig(): Partial<Config> {
-  const getRequiredEnvArray = (name: string): string[] => {
-    const value = process.env[name];
-    if (!value) return []; 
-    return value.split(",");
-  };
+// ADGUARD_USERNAME_FILE_1 (a secret file) wins over ADGUARD_USERNAME_1.
+function credential(env: Env, field: "USERNAME" | "PASSWORD", i: number): string {
+  const file = env[`ADGUARD_${field}_FILE_${i}`];
+  const value = file ? readFileSync(file, "utf8").trim() : env[`ADGUARD_${field}_${i}`];
+  if (!value) {
+    throw new Error(`ADGUARD_URL_${i} is set but ADGUARD_${field}_${i} or ADGUARD_${field}_FILE_${i} is missing or empty`);
+  }
+  return value;
+}
 
-  const urls = getRequiredEnvArray("ADGUARD_URLS");
-  const users = getRequiredEnvArray("ADGUARD_USERNAMES");
-  const passwords = getRequiredEnvArray("ADGUARD_PASSWORDS");
-
-  if (urls.length === 0) {
-    // If neither indexed nor legacy config is found
-    throw new Error("No configuration found. Please set ADGUARD_URL_1 (indexed) or ADGUARD_URLS (legacy).");
+function indexedServers(env: Env): AdGuardServer[] {
+  const servers: AdGuardServer[] = [];
+  for (let i = 1; env[`ADGUARD_URL_${i}`]; i++) {
+    servers.push({
+      url: normalizeUrl(env[`ADGUARD_URL_${i}`]!, `ADGUARD_URL_${i}`),
+      username: credential(env, "USERNAME", i),
+      password: credential(env, "PASSWORD", i),
+    });
   }
 
-  if (urls.length !== users.length || urls.length !== passwords.length) {
+  // A gap in the numbering would silently drop the servers after it.
+  const skipped = Object.keys(env).filter((name) => {
+    const index = /^ADGUARD_URL_(\d+)$/.exec(name)?.[1];
+    return index !== undefined && env[name] && !(Number(index) >= 1 && Number(index) <= servers.length);
+  });
+  if (skipped.length > 0) {
+    throw new Error(`Servers must be numbered from 1 without gaps: ADGUARD_URL_${servers.length + 1} is missing, so ${skipped.join(", ")} cannot be used`);
+  }
+  return servers;
+}
+
+// Comma-separated variant, so neither usernames nor passwords can contain commas.
+function listServers(env: Env): AdGuardServer[] {
+  if (!env.ADGUARD_URLS) {
+    throw new Error("No configuration found. Set ADGUARD_URL_1 (indexed) or ADGUARD_URLS (comma-separated).");
+  }
+  const urls = env.ADGUARD_URLS.split(",");
+  const usernames = env.ADGUARD_USERNAMES?.split(",") ?? [];
+  const passwords = env.ADGUARD_PASSWORDS?.split(",") ?? [];
+  if (urls.length !== usernames.length || urls.length !== passwords.length) {
     throw new Error(
-      `Legacy Configuration Error: Array lengths mismatch. Got ${urls.length} URLs, ${users.length} users, ${passwords.length} passwords.`
+      `ADGUARD_URLS, ADGUARD_USERNAMES and ADGUARD_PASSWORDS must have the same number of items, got ${urls.length}, ${usernames.length} and ${passwords.length}. Passwords with commas need the indexed variables.`,
     );
   }
+  return urls.map((url, i) => ({
+    url: normalizeUrl(url, `Item ${i + 1} of ADGUARD_URLS`),
+    username: usernames[i]!.trim(),
+    password: passwords[i]!, // spaces may be part of a password
+  }));
+}
+
+export function loadConfig(env: Env): Config {
+  const indexed = indexedServers(env);
+  const servers = indexed.length > 0 ? indexed : listServers(env);
+
+  // The URL is the metric label and the state key, so it has to be unique.
+  const duplicate = servers.find((server, i) => servers.findIndex((s) => s.url === server.url) !== i);
+  if (duplicate) throw new Error(`Server ${duplicate.url} is configured more than once`);
 
   return {
-    adGuardUrls: urls.map((url) => (url.startsWith("http") ? url : `http://${url}`)),
-    adGuardUsernames: users,
-    adGuardPasswords: passwords,
+    servers,
+    // Statistics are read per hour, a longer interval would skip whole hours.
+    scrapeIntervalSeconds: positiveInt(env, "SCRAPE_INTERVAL_SECONDS", 30, 3600),
+    port: positiveInt(env, "PORT", 9100, 65535),
   };
 }
-
-// Main Loading Logic
-const commonConfig = {
-  scrapeIntervalSeconds: process.env.SCRAPE_INTERVAL_SECONDS ? parseInt(process.env.SCRAPE_INTERVAL_SECONDS) : 30,
-  port: process.env.PORT ? parseInt(process.env.PORT) : 9100,
-};
-
-let serverConfig = loadIndexedConfig();
-
-if (!serverConfig) {
-  // If no indexed vars found, try legacy
-  serverConfig = loadLegacyConfig();
-}
-
-export const config: Config = {
-  ...commonConfig,
-  adGuardUrls: serverConfig.adGuardUrls!,
-  adGuardUsernames: serverConfig.adGuardUsernames!,
-  adGuardPasswords: serverConfig.adGuardPasswords!,
-};

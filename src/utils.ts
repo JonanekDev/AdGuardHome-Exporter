@@ -1,90 +1,36 @@
-import promClient from "prom-client";
-import { StatEntry } from "./types";
-import { AxiosRequestConfig } from "axios";
-const previousValues: Record<string, Record<string, number>> = {};
+import type { Counter } from "prom-client";
 
-export function updateCounter(
-  metric: promClient.Counter<string>,
-  instance: string,
-  field: string,
-  newValue: number,
-) {
-  if (!previousValues[instance]) previousValues[instance] = {};
-
-  const prev = previousValues[instance][field];
-
-  // First load
-  if (prev === undefined) {
-    previousValues[instance][field] = newValue;
-    return;
-  }
-
-  // Detected reset - save new value without incrementing
-  if (newValue < prev) {
-    previousValues[instance][field] = newValue;
-    return;
-  }
-
-  // Normal increment
-  metric.inc({ instance }, newValue - prev);
-
-  previousValues[instance][field] = newValue;
+export interface Sample {
+  counter: Counter<string>;
+  labels: Record<string, string>;
+  value: number; // total within the current AdGuard hour
 }
 
-export function setTopStats(
-  metric: promClient.Gauge<string>,
-  instance: string,
-  data: StatEntry[],
-  label: string,
-) {
-  for (const row of data) {
-    for (const [key, value] of Object.entries(row)) {
-      metric.set({ instance, [label]: key }, value);
-    }
-  }
+interface HourState {
+  hour: number;
+  values: Map<Counter<string>, Map<string, number>>; // per metric and its labels
 }
 
-export function updateTopStatsCounter(
-  metric: promClient.Counter<string>,
-  instance: string,
-  data: StatEntry[],
-  label: string,
-) {
-  const counterKey = `${instance}\0${label}`;
-  if (!previousValues[counterKey]) previousValues[counterKey] = {};
+const previous = new Map<string, HourState>();
 
-  for (const row of data) {
-    for (const [key, value] of Object.entries(row)) {
-      const prev = previousValues[counterKey][key];
+// AdGuard statistics are bucketed by hour and values only grow within a bucket.
+// ponytail: queries made between the last scrape and the end of the hour are
+// lost; if that matters, read the previous bucket using recent=7200000.
+export function addDeltas(instance: string, hour: number, samples: Sample[]) {
+  const last = previous.get(instance);
+  // A new hour starts from zero, so its whole values are new.
+  const values: HourState["values"] = last?.hour === hour ? last.values : new Map();
 
-      // First load
-      if (prev === undefined) {
-        previousValues[counterKey][key] = value;
-        continue;
-      }
-
-      // Detected reset - save new value without incrementing
-      if (value < prev) {
-        previousValues[counterKey][key] = value;
-        continue;
-      }
-
-      // Normal increment
-      metric.inc({ instance, [label]: key }, value - prev);
-
-      previousValues[counterKey][key] = value;
-    }
+  for (const { counter, labels, value } of samples) {
+    const series = values.get(counter) ?? new Map<string, number>();
+    values.set(counter, series);
+    const key = JSON.stringify(labels);
+    const delta = value - (series.get(key) ?? 0);
+    // The first scrape is only a baseline. A negative delta means the
+    // statistics were reset, which also just sets a new baseline.
+    counter.inc(labels, last && delta > 0 ? delta : 0);
+    series.set(key, value);
   }
-}
 
-export function getHeaderAuth(
-  username: string,
-  password: string,
-): AxiosRequestConfig {
-  return {
-    headers: {
-      Authorization:
-        "Basic " + Buffer.from(`${username}:${password}`).toString("base64"),
-    },
-  };
+  previous.set(instance, { hour, values });
 }

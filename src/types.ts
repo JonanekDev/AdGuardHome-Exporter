@@ -27,7 +27,6 @@ export interface AdGuardAPIStats {
   dns_queries: number[];
   blocked_filtering: number[];
   replaced_safebrowsing: number[];
-  replaced_safesearch: number[];
   replaced_parental: number[];
 
   num_dns_queries: number;

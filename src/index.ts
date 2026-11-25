@@ -1,42 +1,39 @@
-import { config } from "./config";
-import * as http from "http";
-import { register, fetch } from "./metrics";
-import { AdGuardServer } from "./types";
+import { loadConfig, type Config } from "./config.ts";
+import * as http from "node:http";
+import { register, scrapeAll } from "./metrics.ts";
 
-const adguardServers: AdGuardServer[] = [];
+// As the main process of a container, Node would otherwise ignore SIGTERM.
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.on(signal, () => process.exit(0));
+}
 
-for (const [i, url] of config.adGuardUrls.entries()) {
-  adguardServers.push({
-    url: url,
-    username: config.adGuardUsernames[i]!,
-    password: config.adGuardPasswords[i]!,
-  });
+let config: Config;
+try {
+  config = loadConfig(process.env);
+} catch (error) {
+  console.error(`Configuration error: ${error instanceof Error ? error.message : error}`);
+  process.exit(1);
 }
 
 const server = http.createServer(async (req, res) => {
   if (req.url === "/metrics") {
-    console.log(`[${new Date().toISOString()}] /metrics endpoint requested`);
-    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.writeHead(200, { "Content-Type": register.contentType });
     res.end(await register.metrics());
   } else {
-    console.log(`[${new Date().toISOString()}] 404 - Not Found: ${req.url}`);
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("404 - Not Found");
   }
 });
 
-server.listen(config.port, async () => {
-  console.log(`Exporter listening on port ${config.port}`);
-  console.log(`Scrape interval: ${config.scrapeIntervalSeconds} seconds`);
-  console.log(`AdGuard servers configured: ${config.adGuardUrls.join(", ")}`);
+server.listen(config.port, () => {
+  console.log(
+    `Exporter listening on port ${config.port}, scraping ${config.servers.map((s) => s.url).join(", ")} every ${config.scrapeIntervalSeconds} s. Only errors and recoveries are logged from now on.`,
+  );
 });
 
-// Start fetch
-console.log(`[${new Date().toISOString()}] Starting initial fetch from AdGuard servers...`);
-fetch(adguardServers);
-
-// Schedule periodic fetch
-setInterval(async () => {
-  console.log(`[${new Date().toISOString()}] Starting periodic fetch from AdGuard servers...`);
-  await fetch(adguardServers);
-}, config.scrapeIntervalSeconds * 1000);
+// The next scrape is scheduled after the previous one ends, so they never overlap.
+async function scrapeLoop() {
+  await scrapeAll(config.servers);
+  setTimeout(scrapeLoop, config.scrapeIntervalSeconds * 1000);
+}
+scrapeLoop();

@@ -1,5 +1,6 @@
 node_modules
 dist
+test
 .git
 .gitignore
 .env
@@ -7,3 +8,5 @@ dist
 .vscode
 .github
 dashboard.json
+instance*_username.txt
+instance*_password.txt
