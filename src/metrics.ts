@@ -1,7 +1,6 @@
 import promClient from "prom-client";
-import { AdGuardAPIStats, AdGuardAPIStatus, AdGuardServer, StatEntry } from "./types";
-import axios, { AxiosResponse } from "axios";
-import { updateCounter, setTopStats, updateTopStatsCounter, getHeaderAuth } from "./utils";
+import type { AdGuardAPIStats, AdGuardAPIStatus, AdGuardServer, StatEntry } from "./types.ts";
+import { addDeltas, type Sample } from "./utils.ts";
 
 export const register = new promClient.Registry();
 
@@ -9,7 +8,7 @@ const metrics = {
   // Status
   running: new promClient.Gauge({
     name: "adguard_running",
-    help: "Indicates if the application is running (1=true, 0=false)",
+    help: "Indicates if AdGuard Home is reachable and its DNS server is running (1=true, 0=false)",
     labelNames: ["instance"],
     registers: [register],
   }),
@@ -27,7 +26,14 @@ const metrics = {
   }),
   adguardProtectionDisabledDuration: new promClient.Gauge({
     name: "adguard_protection_disabled_duration_seconds",
-    help: "Duration in seconds for which protection has been disabled",
+    help: "Seconds remaining until paused protection is enabled again (0=not paused)",
+    labelNames: ["instance"],
+    registers: [register],
+  }),
+
+  statsUp: new promClient.Gauge({
+    name: "adguard_stats_up",
+    help: "Indicates if the last statistics fetch succeeded (1=true, 0=false)",
     labelNames: ["instance"],
     registers: [register],
   }),
@@ -41,7 +47,7 @@ const metrics = {
   }),
   blockedQueriesTotal: new promClient.Counter({
     name: "adguard_blocked_queries_total",
-    help: "Total number of blocked DNS queries",
+    help: "Total number of DNS queries blocked by filtering rules",
     labelNames: ["instance"],
     registers: [register],
   }),
@@ -66,7 +72,7 @@ const metrics = {
 
   avgProcessingTime: new promClient.Gauge({
     name: "adguard_avg_processing_time_ms",
-    help: "Average processing time for DNS queries in ms",
+    help: "Average processing time for DNS queries in the current hour in ms",
     labelNames: ["instance"],
     registers: [register],
   }),
@@ -98,154 +104,144 @@ const metrics = {
   }),
   topUpstreamsAvgTime: new promClient.Gauge({
     name: "adguard_top_upstreams_avg_time_ms",
-    help: "Top upstream average response time in ms",
+    help: "Top upstream average response time in the current hour in ms",
     labelNames: ["instance", "upstream"],
     registers: [register],
   }),
 };
 
-async function fetchAdGuardStatus(server: AdGuardServer): Promise<void> {
-  try {
-    console.log(`[${new Date().toISOString()}] Fetching status from ${server.url}...`);
-    const response: AxiosResponse<AdGuardAPIStatus> =
-      await axios.get<AdGuardAPIStatus>(
-        `${server.url}/control/status`,
-        getHeaderAuth(server.username, server.password),
-      );
-    const status: AdGuardAPIStatus = response.data;
+const HOUR_MS = 3_600_000;
+const TIMEOUT_MS = 10_000;
+// AdGuard switches to a new hourly bucket up to about a second late, so right
+// after a full hour the response may still hold the previous hour.
+const HOUR_SWITCH_GRACE_MS = 5_000;
 
-    metrics.running.set({ instance: server.url }, 1);
+async function get<T>(server: AdGuardServer, path: string) {
+  const auth = Buffer.from(`${server.username}:${server.password}`).toString("base64");
+  const response = await fetch(`${server.url}/control/${path}`, {
+    headers: { Authorization: `Basic ${auth}` },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return {
+    data: (await response.json()) as T,
+    // Server time decides which hourly bucket the data belongs to.
+    time: Date.parse(response.headers.get("date") ?? "") || Date.now(),
+  };
+}
 
-    metrics.protectionEnabled.set(
-      { instance: server.url },
-      status.protection_enabled ? 1 : 0,
-    );
+// Only changes are logged, so a server that stays offline does not flood the log.
+const lastErrors = new Map<string, string>();
 
-    metrics.DHCPAvailable.set(
-      { instance: server.url },
-      status.dhcp_available ? 1 : 0,
-    );
+function logResult(what: string, error?: unknown) {
+  const previousError = lastErrors.get(what);
+  if (error === undefined) {
+    if (previousError !== undefined) {
+      lastErrors.delete(what);
+      console.log(`[${new Date().toISOString()}] Recovered: ${what}`);
+    }
+    return;
+  }
 
-    metrics.adguardProtectionDisabledDuration.set(
-      { instance: server.url },
-      status.protection_disabled_duration ?? 0,
-    );
-
-    console.log(`[${new Date().toISOString()}] Status fetched from ${server.url}: running=true, protection_enabled=${status.protection_enabled}, dhcp_available=${status.dhcp_available}`);
-  } catch (error) {
-    console.error(
-      `[${new Date().toISOString()}] Error fetching status from ${server.url}:`,
-      error instanceof Error ? error.message : error,
-    );
-    metrics.running.set({ instance: server.url }, 0);
+  // Native fetch hides the reason (ECONNREFUSED, ...) in error.cause.
+  const cause = (error as { cause?: { code?: string; message?: string } }).cause;
+  const reason = cause?.code || cause?.message;
+  const message = (error instanceof Error ? error.message : String(error)) + (reason ? ` (${reason})` : "");
+  if (message !== previousError) {
+    lastErrors.set(what, message);
+    console.error(`[${new Date().toISOString()}] Error: ${what}: ${message}`);
   }
 }
 
-async function fetchAdGuardStats(server: AdGuardServer): Promise<void> {
-  try {
-    console.log(`[${new Date().toISOString()}] Fetching stats from ${server.url}...`);
-    const response: AxiosResponse<AdGuardAPIStats> =
-      await axios.get<AdGuardAPIStats>(
-        `${server.url}/control/stats`,
-        getHeaderAuth(server.username, server.password),
-      );
-    const stats: AdGuardAPIStats = response.data;
-
-    // Top stats
-    updateTopStatsCounter(metrics.topClients, server.url, stats.top_clients, "client");
-
-    updateTopStatsCounter(
-      metrics.topBlockedDomains,
-      server.url,
-      stats.top_blocked_domains,
-      "domain",
-    );
-
-    updateTopStatsCounter(
-      metrics.topQueriedDomains,
-      server.url,
-      stats.top_queried_domains,
-      "domain",
-    );
-
-    setTopStats(
-      metrics.topUpstreamsAvgTime,
-      server.url,
-      stats.top_upstreams_avg_time.map((entry) => {
-        // Convert to ms
-        const convertedEntry: StatEntry = {};
-        for (const [key, value] of Object.entries(entry)) {
-          convertedEntry[key] = value * 1000;
-        }
-        return convertedEntry;
-      }),
-      "upstream",
-    );
-
-    updateTopStatsCounter(
-      metrics.topUpstreamsResponses,
-      server.url,
-      stats.top_upstreams_responses,
-      "upstream",
-    );
-
-    // Counters
-    updateCounter(
-      metrics.dnsQueriesTotal,
-      server.url,
-      "num_dns_queries",
-      stats.num_dns_queries,
-    );
-
-    updateCounter(
-      metrics.blockedQueriesTotal,
-      server.url,
-      "num_blocked_filtering",
-      stats.num_blocked_filtering,
-    );
-
-    updateCounter(
-      metrics.replacedSafeSearchTotal,
-      server.url,
-      "num_replaced_safesearch",
-      stats.num_replaced_safesearch,
-    );
-
-    updateCounter(
-      metrics.replacedSafeBrowsingTotal,
-      server.url,
-      "num_replaced_safebrowsing",
-      stats.num_replaced_safebrowsing,
-    );
-
-    updateCounter(
-      metrics.replacedParentalTotal,
-      server.url,
-      "num_replaced_parental",
-      stats.num_replaced_parental,
-    );
-
-    metrics.avgProcessingTime.set(
-      { instance: server.url },
-      stats.avg_processing_time * 1000,
-    );
-
-    console.log(`[${new Date().toISOString()}] Stats fetched from ${server.url}: dns_queries=${stats.num_dns_queries}, blocked=${stats.num_blocked_filtering}, avg_time=${(stats.avg_processing_time * 1000).toFixed(2)}ms`);
-    console.log(`[${new Date().toISOString()}] Top clients: ${stats.top_clients.slice(0, 3).map((c) => Object.keys(c)[0]).join(", ") || "none"}`);
-    console.log(`[${new Date().toISOString()}] Top blocked domains: ${stats.top_blocked_domains.slice(0, 3).map((d) => Object.keys(d)[0]).join(", ") || "none"}`);
-  } catch (error) {
-    console.error(
-      `[${new Date().toISOString()}] Error fetching stats from ${server.url}:`,
-      error instanceof Error ? error.message : error,
-    );
-    metrics.running.set({ instance: server.url }, 0);
+async function removeUpstreamTimes(instance: string) {
+  for (const { labels } of (await metrics.topUpstreamsAvgTime.get()).values) {
+    if (labels.instance === instance) metrics.topUpstreamsAvgTime.remove(labels);
   }
 }
 
-export async function fetch(servers: AdGuardServer[]): Promise<void> {
-  for (const server of servers) {
-    await fetchAdGuardStatus(server);
-    await fetchAdGuardStats(server);
+async function scrapeStatus(server: AdGuardServer): Promise<void> {
+  const labels = { instance: server.url };
+  try {
+    const { data: status } = await get<AdGuardAPIStatus>(server, "status");
+
+    metrics.running.set(labels, status.running ? 1 : 0);
+    metrics.protectionEnabled.set(labels, status.protection_enabled ? 1 : 0);
+    metrics.DHCPAvailable.set(labels, status.dhcp_available ? 1 : 0);
+    metrics.adguardProtectionDisabledDuration.set(labels, (status.protection_disabled_duration ?? 0) / 1000);
+    logResult(`status of ${server.url}`);
+  } catch (error) {
+    metrics.running.set(labels, 0);
+    // Old values would look current.
+    metrics.protectionEnabled.remove(labels);
+    metrics.DHCPAvailable.remove(labels);
+    metrics.adguardProtectionDisabledDuration.remove(labels);
+    logResult(`status of ${server.url}`, error);
   }
-  console.log(`[${new Date().toISOString()}] All AdGuard servers fetched successfully`);
+}
+
+async function scrapeStats(server: AdGuardServer): Promise<void> {
+  const instance = server.url;
+  try {
+    // Only the current hour. The whole retention window is a sliding sum, which
+    // cannot be turned into counters.
+    const { data: stats, time } = await get<AdGuardAPIStats>(server, `stats?recent=${HOUR_MS}`);
+    if (stats.dns_queries.length !== 1) {
+      throw new Error("AdGuard Home ignored the 'recent' parameter, please update AdGuard Home");
+    }
+
+    const top = (counter: promClient.Counter<string>, label: string, rows: StatEntry[]): Sample[] =>
+      rows.flatMap((row) =>
+        Object.entries(row).map(([key, value]) => ({ counter, labels: { instance, [label]: key }, value })),
+      );
+    const total = (counter: promClient.Counter<string>, value: number): Sample => ({
+      counter,
+      labels: { instance },
+      value,
+    });
+
+    if (time % HOUR_MS >= HOUR_SWITCH_GRACE_MS) {
+      addDeltas(instance, Math.floor(time / HOUR_MS), [
+        total(metrics.dnsQueriesTotal, stats.num_dns_queries),
+        total(metrics.blockedQueriesTotal, stats.num_blocked_filtering),
+        total(metrics.replacedSafeBrowsingTotal, stats.num_replaced_safebrowsing),
+        total(metrics.replacedSafeSearchTotal, stats.num_replaced_safesearch),
+        total(metrics.replacedParentalTotal, stats.num_replaced_parental),
+        ...top(metrics.topClients, "client", stats.top_clients),
+        ...top(metrics.topQueriedDomains, "domain", stats.top_queried_domains),
+        ...top(metrics.topBlockedDomains, "domain", stats.top_blocked_domains),
+        ...top(metrics.topUpstreamsResponses, "upstream", stats.top_upstreams_responses),
+      ]);
+    }
+
+    // An hour without queries has no average, 0 ms would be misleading.
+    if (stats.num_dns_queries > 0) {
+      metrics.avgProcessingTime.set({ instance }, stats.avg_processing_time * 1000);
+    } else {
+      metrics.avgProcessingTime.remove({ instance });
+    }
+
+    await removeUpstreamTimes(instance);
+    for (const row of stats.top_upstreams_avg_time) {
+      for (const [upstream, seconds] of Object.entries(row)) {
+        metrics.topUpstreamsAvgTime.set({ instance, upstream }, seconds * 1000);
+      }
+    }
+
+    metrics.statsUp.set({ instance }, 1);
+    logResult(`stats of ${server.url}`);
+  } catch (error) {
+    metrics.statsUp.set({ instance }, 0);
+    metrics.avgProcessingTime.remove({ instance });
+    await removeUpstreamTimes(instance);
+    logResult(`stats of ${server.url}`, error);
+  }
+}
+
+export async function scrapeAll(servers: AdGuardServer[]): Promise<void> {
+  await Promise.all(
+    servers.flatMap((server) => [scrapeStatus(server), scrapeStats(server)]),
+  );
 }

@@ -1,3 +1,5 @@
 dist
 node_modules
 .env
+instance*_username.txt
+instance*_password.txt

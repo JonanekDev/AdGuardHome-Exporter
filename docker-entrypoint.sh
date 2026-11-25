@@ -5,12 +5,9 @@ SECRETS_DST="/app/secrets"
 
 mkdir -p "$SECRETS_DST"
 
-found_any=0
-
 for name in $(env | cut -d= -f1); do
   case "$name" in
-    *_FILE|*_FILE_*)
-      found_any=1
+    ADGUARD_*_FILE_*)
       value="$(eval echo "\$$name")"
 
       if [ ! -f "$value" ]; then
@@ -18,8 +15,8 @@ for name in $(env | cut -d= -f1); do
         exit 1
       fi
 
-      base="$(basename "$value")"
-      dst="$SECRETS_DST/$base"
+      # Named after the variable: secret files from different directories may share a name.
+      dst="$SECRETS_DST/$name"
 
       cp "$value" "$dst"
       chown node:node "$dst"
@@ -29,9 +26,5 @@ for name in $(env | cut -d= -f1); do
       ;;
   esac
 done
-
-if [ "$found_any" -eq 0 ]; then
-  echo "WARN: No *_FILE or *_FILE_<n> environment variables found" >&2
-fi
 
 exec su-exec node "$@"

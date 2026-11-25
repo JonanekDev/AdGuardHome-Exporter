@@ -1,6 +1,6 @@
 {
   "name": "adguardhome-exporter",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "",
   "homepage": "https://github.com/JonanekDev/AdGuardHome-Exporter#readme",
   "bugs": {
@@ -12,21 +12,23 @@
   },
   "license": "ISC",
   "author": "JonanekDev",
-  "main": "index.js",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
-    "dev": "ts-node src/index.ts",
+    "dev": "node src/index.ts",
     "build": "tsc",
+    "test": "node --test test/*.test.ts",
     "start": "node dist/index.js",
     "format": "prettier --write ."
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
-    "prettier": "^3.7.3",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+    "@types/node": "^24.19.4",
+    "prettier": "^3.10.1",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
-    "axios": "^1.13.2",
     "prom-client": "^15.1.3"
   }
 }
