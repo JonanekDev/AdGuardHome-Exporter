@@ -11,6 +11,20 @@ export interface AdGuardAPIStatus {
   protection_enabled: boolean;
   dhcp_available: boolean;
   running: boolean;
+  start_time?: number; // Unix milliseconds
+}
+
+export interface AdGuardFilter {
+  id: number;
+  name: string;
+  enabled: boolean;
+  rules_count: number;
+  last_updated?: string;
+}
+
+export interface AdGuardAPIFiltering {
+  filters: AdGuardFilter[] | null;
+  whitelist_filters: AdGuardFilter[] | null;
 }
 
 export type StatEntry = Record<string, number>;

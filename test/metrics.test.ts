@@ -35,6 +35,7 @@ async function fakeAdGuard(t: { after(fn: () => void): void }) {
     time: START,
     status: { running: true, protection_enabled: true, dhcp_available: false, protection_disabled_duration: 0 } as object | null,
     stats: baseStats() as object | null,
+    filtering: { filters: [], whitelist_filters: null } as object | null,
     statsUrl: "",
     url: "",
     async scrape() {
@@ -50,7 +51,8 @@ async function fakeAdGuard(t: { after(fn: () => void): void }) {
   const server = http.createServer((req, res) => {
     const isStats = req.url!.startsWith("/control/stats");
     if (isStats) fake.statsUrl = req.url!;
-    const body = isStats ? fake.stats : fake.status;
+    const isFiltering = req.url === "/control/filtering/status";
+    const body = isStats ? fake.stats : isFiltering ? fake.filtering : fake.status;
     res.setHeader("Date", new Date(fake.time).toUTCString());
     res.writeHead(body ? 200 : 500, { "Content-Type": "application/json" });
     res.end(JSON.stringify(body ?? {}));
@@ -177,4 +179,48 @@ test("only new errors and recoveries are logged", async (t) => {
   fake.stats = baseStats();
   await fake.scrape();
   assert.match(lines[1]!, /Recovered: stats of/);
+});
+
+test("version and start time", async (t) => {
+  const fake = await fakeAdGuard(t);
+  fake.status = { running: true, version: "v1", start_time: 1_700_000_000_500 };
+  await fake.scrape();
+  assert.equal(await fake.value("adguard_info", { version: "v1" }), 1);
+  assert.equal(await fake.value("adguard_start_time_seconds"), 1_700_000_000.5);
+
+  fake.status = { running: true, version: "v2" };
+  await fake.scrape();
+  assert.equal(await fake.value("adguard_info", { version: "v1" }), undefined, "old version disappears");
+  assert.equal(await fake.value("adguard_info", { version: "v2" }), 1);
+
+  fake.status = null;
+  await fake.scrape();
+  assert.equal(await fake.value("adguard_info"), undefined);
+  assert.equal(await fake.value("adguard_start_time_seconds"), undefined);
+});
+
+test("filter lists", async (t) => {
+  const fake = await fakeAdGuard(t);
+  const list = { id: 1, name: "ads", enabled: true, rules_count: 42, last_updated: "2026-11-24T13:00:00Z" };
+  fake.filtering = {
+    filters: [list, { id: 2, name: "never", enabled: false, rules_count: 0 }],
+    whitelist_filters: [{ ...list, id: 3, name: "allow" }],
+  };
+  await fake.scrape();
+  assert.equal(await fake.value("adguard_filter_rules", { filter_id: "1", filter: "ads" }), 42);
+  assert.equal(await fake.value("adguard_filter_enabled", { filter: "never" }), 0);
+  assert.equal(await fake.value("adguard_filter_last_updated_seconds", { filter: "ads" }), Date.parse(list.last_updated) / 1000);
+  assert.equal(await fake.value("adguard_filter_last_updated_seconds", { filter: "never" }), undefined);
+  assert.equal(await fake.value("adguard_filter_rules", { filter: "allow" }), 42);
+
+  fake.filtering = { filters: null, whitelist_filters: null };
+  await fake.scrape();
+  assert.equal(await fake.value("adguard_filter_rules"), undefined, "removed lists disappear");
+
+  fake.filtering = { filters: [list] };
+  await fake.scrape();
+  fake.filtering = null;
+  await fake.scrape();
+  assert.equal(await fake.value("adguard_filter_rules"), undefined);
+  assert.equal(await fake.value("adguard_running"), 1);
 });

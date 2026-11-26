@@ -137,6 +137,11 @@ All metrics have an `instance` label with the AdGuard Home URL. With the default
 | `adguard_protection_enabled`                   |             | Protection is enabled                                        |
 | `adguard_protection_disabled_duration_seconds` |             | Seconds remaining until paused protection is enabled again   |
 | `adguard_dhcp_available`                       |             | DHCP is available                                            |
+| `adguard_info`                                 | `version`   | AdGuard Home version, the value is always 1                  |
+| `adguard_start_time_seconds`                   |             | Unix time when the AdGuard Home web API started              |
+| `adguard_filter_enabled`                       | `filter_id`, `filter` | The filter list is enabled                                   |
+| `adguard_filter_rules`                         | `filter_id`, `filter` | Number of rules in the filter list                           |
+| `adguard_filter_last_updated_seconds`          | `filter_id`, `filter` | Unix time of the last update, missing if never downloaded    |
 | `adguard_dns_queries_total`                    |             | DNS queries                                                  |
 | `adguard_blocked_queries_total`                |             | Queries blocked by filtering rules                           |
 | `adguard_replaced_safebrowsing_total`          |             | Queries blocked by Safe Browsing                             |
@@ -158,7 +163,7 @@ All metrics have an `instance` label with the AdGuard Home URL. With the default
 
 ## Logs
 
-The exporter logs one line at startup, then only new or changed errors and the recovery from them. Status and statistics are reported separately, so a server going offline usually produces two lines, not two on every scrape.
+The exporter logs one line at startup, then only new or changed errors and the recovery from them. Status, statistics and filter lists are reported separately, so a server going offline usually produces three lines, not three on every scrape.
 
 If AdGuard Home is only reachable through an HTTP proxy, set `NODE_USE_ENV_PROXY=1` together with `HTTP_PROXY` / `HTTPS_PROXY`.
 

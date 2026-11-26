@@ -6,7 +6,7 @@ const dashboard = JSON.parse(readFileSync(new URL("../dashboard.json", import.me
 const panels: any[] = dashboard.panels.flatMap((p: any) => [p, ...(p.panels ?? [])]);
 
 test("tables and pie charts use instant queries", () => {
-  const targets = panels.filter((p) => p.type === "table" || p.type === "piechart").flatMap((p) => p.targets);
+  const targets = panels.filter((p) => ["table", "piechart", "bargauge"].includes(p.type)).flatMap((p) => p.targets);
   assert.ok(targets.length > 0);
   for (const target of targets) {
     assert.equal(target.instant, true, target.expr);

@@ -1,5 +1,5 @@
 import promClient from "prom-client";
-import type { AdGuardAPIStats, AdGuardAPIStatus, AdGuardServer, StatEntry } from "./types.ts";
+import type { AdGuardAPIFiltering, AdGuardAPIStats, AdGuardAPIStatus, AdGuardServer, StatEntry } from "./types.ts";
 import { addDeltas, type Sample } from "./utils.ts";
 
 export const register = new promClient.Registry();
@@ -35,6 +35,39 @@ const metrics = {
     name: "adguard_stats_up",
     help: "Indicates if the last statistics fetch succeeded (1=true, 0=false)",
     labelNames: ["instance"],
+    registers: [register],
+  }),
+
+  info: new promClient.Gauge({
+    name: "adguard_info",
+    help: "AdGuard Home version, the value is always 1",
+    labelNames: ["instance", "version"],
+    registers: [register],
+  }),
+  startTime: new promClient.Gauge({
+    name: "adguard_start_time_seconds",
+    help: "Unix time when the AdGuard Home web API started",
+    labelNames: ["instance"],
+    registers: [register],
+  }),
+
+  // Filter lists
+  filterEnabled: new promClient.Gauge({
+    name: "adguard_filter_enabled",
+    help: "Indicates if the filter list is enabled (1=true, 0=false)",
+    labelNames: ["instance", "filter_id", "filter"],
+    registers: [register],
+  }),
+  filterRules: new promClient.Gauge({
+    name: "adguard_filter_rules",
+    help: "Number of rules in the filter list",
+    labelNames: ["instance", "filter_id", "filter"],
+    registers: [register],
+  }),
+  filterLastUpdated: new promClient.Gauge({
+    name: "adguard_filter_last_updated_seconds",
+    help: "Unix time of the last filter list update",
+    labelNames: ["instance", "filter_id", "filter"],
     registers: [register],
   }),
 
@@ -156,9 +189,12 @@ function logResult(what: string, error?: unknown) {
   }
 }
 
-async function removeUpstreamTimes(instance: string) {
-  for (const { labels } of (await metrics.topUpstreamsAvgTime.get()).values) {
-    if (labels.instance === instance) metrics.topUpstreamsAvgTime.remove(labels);
+// Removes every series of the instance, whatever its other labels are.
+async function removeSeries(instance: string, ...gauges: promClient.Gauge<string>[]) {
+  for (const gauge of gauges) {
+    for (const { labels } of (await gauge.get()).values) {
+      if (labels.instance === instance) gauge.remove(labels);
+    }
   }
 }
 
@@ -171,6 +207,9 @@ async function scrapeStatus(server: AdGuardServer): Promise<void> {
     metrics.protectionEnabled.set(labels, status.protection_enabled ? 1 : 0);
     metrics.DHCPAvailable.set(labels, status.dhcp_available ? 1 : 0);
     metrics.adguardProtectionDisabledDuration.set(labels, (status.protection_disabled_duration ?? 0) / 1000);
+    await removeSeries(server.url, metrics.info); // the version label may have changed
+    metrics.info.set({ ...labels, version: status.version }, 1);
+    if (status.start_time) metrics.startTime.set(labels, status.start_time / 1000);
     logResult(`status of ${server.url}`);
   } catch (error) {
     metrics.running.set(labels, 0);
@@ -178,6 +217,8 @@ async function scrapeStatus(server: AdGuardServer): Promise<void> {
     metrics.protectionEnabled.remove(labels);
     metrics.DHCPAvailable.remove(labels);
     metrics.adguardProtectionDisabledDuration.remove(labels);
+    metrics.startTime.remove(labels);
+    await removeSeries(server.url, metrics.info);
     logResult(`status of ${server.url}`, error);
   }
 }
@@ -223,7 +264,7 @@ async function scrapeStats(server: AdGuardServer): Promise<void> {
       metrics.avgProcessingTime.remove({ instance });
     }
 
-    await removeUpstreamTimes(instance);
+    await removeSeries(instance, metrics.topUpstreamsAvgTime);
     for (const row of stats.top_upstreams_avg_time) {
       for (const [upstream, seconds] of Object.entries(row)) {
         metrics.topUpstreamsAvgTime.set({ instance, upstream }, seconds * 1000);
@@ -235,13 +276,37 @@ async function scrapeStats(server: AdGuardServer): Promise<void> {
   } catch (error) {
     metrics.statsUp.set({ instance }, 0);
     metrics.avgProcessingTime.remove({ instance });
-    await removeUpstreamTimes(instance);
+    await removeSeries(instance, metrics.topUpstreamsAvgTime);
     logResult(`stats of ${server.url}`, error);
+  }
+}
+
+async function scrapeFilters(server: AdGuardServer): Promise<void> {
+  const instance = server.url;
+  const gauges = [metrics.filterEnabled, metrics.filterRules, metrics.filterLastUpdated];
+  try {
+    const { data } = await get<AdGuardAPIFiltering>(server, "filtering/status");
+
+    // Removed or renamed lists must not stay behind.
+    await removeSeries(instance, ...gauges);
+    // AdGuard sends null for an empty list of filters.
+    for (const filter of [...(data.filters ?? []), ...(data.whitelist_filters ?? [])]) {
+      const labels = { instance, filter_id: String(filter.id), filter: filter.name };
+      metrics.filterEnabled.set(labels, filter.enabled ? 1 : 0);
+      metrics.filterRules.set(labels, filter.rules_count);
+      // Missing for lists that have never been downloaded.
+      const updated = Date.parse(filter.last_updated ?? "");
+      if (updated > 0) metrics.filterLastUpdated.set(labels, updated / 1000);
+    }
+    logResult(`filter lists of ${server.url}`);
+  } catch (error) {
+    await removeSeries(instance, ...gauges);
+    logResult(`filter lists of ${server.url}`, error);
   }
 }
 
 export async function scrapeAll(servers: AdGuardServer[]): Promise<void> {
   await Promise.all(
-    servers.flatMap((server) => [scrapeStatus(server), scrapeStats(server)]),
+    servers.flatMap((server) => [scrapeStatus(server), scrapeStats(server), scrapeFilters(server)]),
   );
 }
